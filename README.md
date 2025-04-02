@@ -1,4 +1,4 @@
- # MHAlpha
+ # MoodleHelper
 #### Компаньон для системы Moodle 
 
 ## Важное
