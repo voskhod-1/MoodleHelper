@@ -30,14 +30,15 @@ public class Login extends JFrame{
                     JOptionPane.showMessageDialog(Login.this, "Пожалуйста, заполните все поля", "Ошибка", JOptionPane.ERROR_MESSAGE);
                     return;
                 }
+                MoodleUser student = null;
                 try {
-                    MoodleUser student = new MoodleUser(loginField.getText(), pwdField.getText());
-                    new Menu(student);
-                    dispose();
+                    student = new MoodleUser(loginField.getText(), pwdField.getText());
+
                 } catch (IOException ex) {
                     new Error(ex.toString());
-                    dispose();
                 }
+                new Menu(student);
+                dispose();
             }
         });
 
