@@ -4,13 +4,12 @@ import Logic.JsonIO;
 import Logic.MoodleUser;
 import Logic.NowDateTime;
 import Logic.Schedule;
+import org.openqa.selenium.By;
+import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.WebDriver;
 
 import javax.swing.*;
-import javax.swing.event.ChangeEvent;
-import javax.swing.event.ChangeListener;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 public class AutoMark extends JFrame {
@@ -18,59 +17,121 @@ public class AutoMark extends JFrame {
     private JTextArea textArea1;
     private JPanel panel1;
     private JScrollPane scrollPane1;
+    private volatile boolean running = true;
 
     public AutoMark(MoodleUser user, boolean invert) {
         super("AutoMark");
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         setContentPane(panel1);
-        setSize(400, 400);
-        //pack();
+        setSize(500, 500);
         setLocationRelativeTo(null);
-        setVisible(true);
-        closeBtn.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                dispose();
-                new Menu(user);
-            }
+
+        textArea1.setEditable(false);
+        textArea1.setLineWrap(true);
+        textArea1.setWrapStyleWord(true);
+
+        closeBtn.addActionListener(e -> {
+            running = false;
+            dispose();
+            new Menu(user);
         });
 
-        // Ваш поток для обновления текста в textArea1
+        setVisible(true);
+
         new Thread(() -> {
             try {
                 String strJson = JsonIO.readStringFromFile("classes.json");
                 Schedule schedule = Schedule.stringAsSchedule(strJson);
-                while (true) {
-                    textArea1.append(NowDateTime.getWeekType(invert) + " " + NowDateTime.getDayOfWeek() + " " + NowDateTime.getTime());
-                    String outputInfo = Logic.AutoMark.autoMark(user.getDriver(), schedule, invert);
-                    SwingUtilities.invokeLater(() -> {
-                        if (outputInfo != null) {
-                            int cnt = 0;
-                            if (!outputInfo.contains("mod")) {
-                                cnt++;
-                                textArea1.append("Не удалось отметиться. Попытка " + cnt + "\n");
-                                boolean isSuccess = false;
-                                while (!isSuccess) {
-                                    isSuccess = Logic.AutoMark.mark(user.getDriver(), outputInfo);
+                WebDriver driver = user.getDriver();
+
+                while (running) {
+                    String weekType = NowDateTime.getWeekType(invert);
+                    String dayOfWeek = NowDateTime.getDayOfWeek();
+                    String currentTime = NowDateTime.getTime();
+                    appendToTextArea(String.format(dayOfWeek, weekType, currentTime));
+
+                    String outputStr = String.format("%s %s %s\n", weekType, dayOfWeek, currentTime);
+
+                    Schedule.ClassInfo pairClass = schedule.getNowClassInfo(weekType, dayOfWeek, currentTime);
+
+                    if (pairClass != null) {
+                        String link = pairClass.getUrl();
+                        if (link != null) {
+
+                            outputStr += link + "\n";
+                            System.out.println(outputStr);
+
+                            int attempt = 1;
+                            boolean marked = false;
+
+                            while (!marked) {
+                                appendToTextArea("Попытка отметки #" + attempt);
+                                marked = mark(driver, link);
+
+                                if (!marked) {
+                                    appendToTextArea(String.format("Не удалось отметиться (попытка %d). Повтор через 3 минуты...\n", attempt));
                                     try {
                                         TimeUnit.MINUTES.sleep(3);
-                                    } catch (InterruptedException e1) {
-                                        new Error(e1.toString());
+                                    } catch (InterruptedException e) {
+                                        Thread.currentThread().interrupt();
                                     }
+                                    attempt++;
                                 }
-                                textArea1.append("Успешно");
-                            } else textArea1.append(outputInfo);
-                        } else {
-                            textArea1.append("\n");
+
+                            }
+                            sleepMinutes(1);
+                            appendToTextArea("Успешно отметился #" + attempt);
                         }
-                        textArea1.setCaretPosition(textArea1.getDocument().getLength());
-                    });
-                    TimeUnit.MINUTES.sleep(1);
+                    }
                 }
             } catch (Exception e) {
-                new Error(e.toString());
-                dispose();
+                appendToTextArea("Ошибка: Посещаемости пока нет :(" + "\n");
+                e.printStackTrace();
+            } finally {
+                appendToTextArea("Автоматическая отметка остановлена\n");
             }
         }).start();
+    }
+    private void appendToTextArea(String text) {
+        SwingUtilities.invokeLater(() -> {
+            textArea1.append(text+"\n");
+            textArea1.setCaretPosition(textArea1.getDocument().getLength());
+        });
+    }
+
+    private void sleepMinutes(int minutes) {
+        try {
+            TimeUnit.MINUTES.sleep(minutes);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private void sleepSeconds(int seconds) {
+        try {
+            TimeUnit.SECONDS.sleep(seconds);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+
+
+    public static boolean mark(WebDriver driver, String link) {
+        if (!Objects.equals(driver.getCurrentUrl(), link)) {
+            driver.get(link);
+        }
+        try {
+            driver.navigate().refresh();
+            TimeUnit.SECONDS.sleep(5);
+            driver.findElement(By.linkText("Отметить свое присутствие")).click();
+            TimeUnit.SECONDS.sleep(3);
+            driver.findElement(By.name("status")).click();
+            TimeUnit.SECONDS.sleep(3);
+            driver.findElement(By.id("id_submitbutton")).click();
+            return true;
+        } catch (InterruptedException | NoSuchElementException e) {
+            return false;
+        }
     }
 }
